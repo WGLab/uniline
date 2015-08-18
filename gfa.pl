@@ -3,6 +3,7 @@ use strict;
 use warnings;
 use lib "/home/yunfeiguo/projects/SeqMule/lib";
 use SeqMule::Utils;
+use Data::Dumper;
 
 my $FLANKSIZE = 100;
 my $nproc = 12;
@@ -50,7 +51,6 @@ if(1) {
     }
 }
 warn "$unfilled/$total remains unfilled\n";
-
 #-----------------------------------------------------------------
 sub outputFilledGap {
     #take a lit of filled gaps and their names (gaps that are filled), scores, strands
@@ -97,13 +97,15 @@ sub fillGap {
     } else {
 	warn  "not twin mapping\n" if $debug;
 	#if gap occurs at an edge of the target assembly contig
-	#then this is possible, otherwise no need to further check
-	if($gapRecord->[2] == $sourceProfile{$gapRecord->[0]}->{length} or 
-	    $gapRecord->[1] == 0) {
-	    return(&extendGap({gapRecord=>$gapRecord,mapping=>$mapping,fai=>$fai,id=>$id}));
-	} else {
-	    return;
-	}
+	#then only one sequence can be mapped
+	#when the gap doesn't occur the at edge, it is still possible to have only one sequence mapped
+	#if($gapRecord->[2] == $sourceProfile{$gapRecord->[0]}->{length} or 
+	#    $gapRecord->[1] == 0) {
+	#    return(&extendGap({gapRecord=>$gapRecord,mapping=>$mapping,fai=>$fai,id=>$id}));
+	#} else {
+	#    return;
+	#}
+	return(&extendGap({gapRecord=>$gapRecord,mapping=>$mapping,fai=>$fai,id=>$id}));
     }
 }
 sub extendGap {
@@ -118,41 +120,116 @@ sub extendGap {
     my @results;
     for my $i(@$mapping) {
 	my @oneresult;
-	my $status; #full or partial gap closing
-	my $strand; #+ or -, used in BED
-	modify this part!
-	this is only called when gap is on an edge
-
-	if($i->{strand} eq 'plus') {
-	    $strand = "+";
-	    push @oneresult,$i->{sid},($i->{send}-1);
-	    if($targetProfile{$i->{sid}}->{length} >= $i->{send} + $gapLen) {
-		#gap can be fully filled
-		$status = "full";
-	    push @oneresult,($i->{send}+$gaplen);
-	    } else {
-		#gap can be partially filled
-		$status = "partial";
-	    push @oneresult,($targetProfile{$i->{sid}}->{length});
-	    }
-	    push @oneresult,$id,$i->{e},"+",$status;
-	} elsif ($i->{strand} eq 'minus') {
-	    $strand = "-";
-	    push @oneresult,$i->{sid},($i->{sstart}-1),$i->{send},$id,$i->{e};
-	    if($i->{send} - $gapLen >= 0) {
-		#gap can be fully filled
-		$status = "full";
-	    } else {
-		#gap can be partially filled
-		$status = "partial";
-	    }
-	} else {
-	    die "unknown strand".$i->{strand}."\n";
-	}
-	push @oneresult,$id,$i->{e},$strand,$status;
+	my ($ctg, $start, $end,
+	    $name,$score,
+	    $strand,#+ or -, used in BED
+	    $status,#full or partial gap closing
+	);
+	$ctg = $i->{sid};
+	$name = $id;
+	$score = $i->{e};
+	($start,$end,$strand,$status) = &decideGapLocus($targetProfile{$i->{sid}},$i,$gapRecord,$gapLen);
+	push @oneresult,$ctg, $start, $end, $name,$score, $strand, $status;
 	push @results,\@oneresult;
     }
     return(@results);
+}
+sub decideGapLocus {
+    my $ctgInfo = shift;
+    my $mapping = shift;
+    my $gapRecord = shift;
+    my $gapLen = shift;
+    my ($start,$end,$strand,$status);
+    &fixMapping($mapping);
+    sub fixMapping {
+	my $mapping = shift;
+	if($mapping->{
+    }
+    if($mapping->{strand} eq 'plus') {
+	#* for N, |----> for mapping
+	#case1
+	#---*******|--->-------------------------
+	#case2
+	#----------------------|--->**********---
+	$strand = "+";
+	if(&isUpstream($mapping,$gapRecord)) {
+	    #case2
+	    $start = $mapping->{send}; #-1 is not necessary, this is end for flanking seq
+	    if($ctgInfo->{length} >= $mapping->{send} + $gapLen) {
+		#gap can be fully filled
+		$status = "full";
+		$end = $start + $gapLen;
+	    } else {
+		#gap can be partially filled
+		$status = "partial";
+		$end = $ctgInfo->{length};
+	    }
+	} else {
+	    #case1
+	    $end = $mapping->{sstart}-1; #-1 is necessary
+	    if($end - $gapLen >= 0) {
+		#gap can be fully filled
+		$status = "full";
+		$start = $end - $gapLen;
+	    } else {
+		#gap can be partially filled
+		$status = "partial";
+		$start = 0;
+	    }
+	}
+    } elsif ($mapping->{strand} eq 'minus') {
+	#case3
+	#---*******<---|-------------------------
+	#case4
+	#----------------------<---|**********---
+	$strand = "-";
+	if(&isUpstream($mapping,$gapRecord)) {
+	    #case2
+	    $end = $mapping->{sstart}; #-1 is not necessary, this is end for flanking seq
+	    if($ctgInfo->{length} >= $end + $gapLen) {
+		#gap can be fully filled
+		$status = "full";
+		$start = $end + $gapLen;
+	    } else {
+		#gap can be partially filled
+		$status = "partial";
+		$start = $ctgInfo->{length};
+	    }
+	} else {
+	    #case1
+	    $start = $mapping->{send}-1; #-1 is necessary
+	    if($start - $gapLen >= 0) {
+		#gap can be fully filled
+		$status = "full";
+		$end = $start - $gapLen;
+	    } else {
+		#gap can be partially filled
+		$status = "partial";
+		$end = 0;
+	    }
+	}
+    } else {
+	die "unknown strand:".$mapping->{strand}."\n";
+    }
+    if($start == $end) {
+	for my $i(keys %{$mapping}) {
+	    print "key:$i,value: ",$mapping->{$i},"\n";
+	}
+	die "equal start and end !\n";
+    }
+    return($start,$end,$strand,$status);
+}
+sub isUpstream {
+    my $mapping = shift;
+    my $gap = shift;
+    #chr1:10000-10100
+    my ($start,$end) = $mapping->{qid} =~ /^[^:]+:(\d+)-(\d+)$/ or 
+    die "unrecognized query ID: ",$mapping->{qid},"\n";
+    if($end < $gap->[2]) {
+	return(1);
+    } else {
+	return(0);
+    }
 }
 sub ifTwinMapping {
     my $mapping = shift;
