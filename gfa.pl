@@ -3,33 +3,40 @@ use strict;
 use warnings;
 use lib "/home/yunfeiguo/projects/SeqMule/lib";
 use SeqMule::Utils;
+use File::Basename qw/basename/;
 use Data::Dumper;
 
+#param
 my $FLANKSIZE = 100; #length of flank sequences for anchoring
 my $MIN_GAP_DIST = 2*$FLANKSIZE; #min distance allowed between two gaps
 my $GAPLEN_MIS_TOLERANCE = 100; #max difference between filled gap and original gap
 my $nproc = 12; #nproc for blast
 my $filter = {qcov=>95,idt=>95,e=>1e-8}; #mapping filters
 my $debug = 1;
+#external exe
+my $fa2size = "/home/yunfeiguo/scripts/seq_related/fa2size.pl";
+my $extractGap = "/home/yunfeiguo/scripts/seq_related/extract_gaps.pl";
 
 
-my $fa = "GRCh38full.fa"; 
-my $gap = "$fa.gap.bed";
-my $genome = "$fa.genome";
-my $flankBed = "$fa.gap.flank.bed";
-my $flankFa = "$fa.gap.flank.fa";
-my $db = "/home/yunfeiguo/projects/PacBio_reference_genome/falcon_aln/hx1_20150716/2-asm-falcon/hx1f4full.fa";
+die "Usage: $0 <target assembly> <source assembly>\n" unless @ARGV == 2;
+my $fa = shift @ARGV;
+my $db = shift @ARGV;
+my $gap = (basename $fa).".gap.bed";
+my $genome = (basename $fa).".genome";
+my $flankBed = (basename $fa).".gap.flank.bed";
+my $flankFa = (basename $fa).".gap.flank.fa";
+#my $db = "/home/yunfeiguo/projects/PacBio_reference_genome/falcon_aln/hx1_20150716/2-asm-falcon/hx1f4full.fa";
 my $total = 0;
 my $unfilled = 0;
 
 if(0) {
     my $bed_for_merge = "/tmp/".rand($$).".tmp.bed.formerge";
-    !system("./extract_gaps.pl $fa > $gap") or die "Gap profiling failed\n" or die "$!\n";
+    !system("$extractGap $fa > $gap") or die "Gap profiling failed\n" or die "$!\n";
     !system("cat $gap > $bed_for_merge") and !system("bedtools merge -i $bed_for_merge -d $MIN_GAP_DIST > $gap") or die "failed to merge: $!\n";
-    !system("/home/yunfeiguo/scripts/seq_related/fa2size.pl $fa > $genome") or die "Genome file creation failed\n";
+    !system("$fa2size $fa > $genome") or die "Genome file creation failed\n";
     #prepare blast index
-    !system("makeblastdb -in $db -dbtype nucl") or die "$!\n";
-    !system("makembindex -input $db -iformat fasta") or die "$!\n";
+    !system("makeblastdb -in $db -dbtype nucl") or die "makeblastdb: $!\n";
+    !system("makembindex -input $db -iformat blastdb") or die "makembindex: $!\n";
 }
 if(1) {
     for my $onegapRecord(&readBED($gap)) {
@@ -41,8 +48,8 @@ if(1) {
 	my $oneresult = "$oneflank.mapping";
 	!system("bedtools flank -i $onegap -g $genome -b $FLANKSIZE > $oneflank") or die "Extraction of flanking sequences failed: $!\n";
 	!system("bedtools getfasta -fi $fa -bed $oneflank -fo $oneflankfa") or die "BED2FA failed: $!\n";
-	warn "$oneflank" if $debug;
-	warn "$oneflankfa" if $debug;
+	warn "$oneflank\n" if $debug;
+	warn "$oneflankfa\n" if $debug;
 	!system("blastn -db $db -query $oneflankfa -num_threads $nproc -task megablast -max_target_seqs 1 -outfmt '10 qseqid qlen sseqid slen qstart qend sstart send sstrand evalue pident qcovs' > $oneresult") or die "blast failed: $!\n";
 	warn "mapping for $gapid: $oneresult\n" if $debug;
 	my @filledGap = &fillGap({source=>$fa,id=>$gapid,filter=>$filter,mapping=>$oneresult,db=>$db,gapRecord=>$onegapRecord});
@@ -50,12 +57,12 @@ if(1) {
 	    &outputFilledGap(@filledGap);
 	} else {
 	    $unfilled ++;
-	    warn "$gapid cannot be filled\n";
+	    warn "NOTICE: $gapid cannot be filled\n";
 	}
 	$total++;
     }
 }
-warn "$unfilled/$total remains unfilled\n";
+warn "NOTICE: $unfilled/$total remains unfilled\n";
 #-----------------------------------------------------------------
 sub outputFilledGap {
     #take a lit of filled gaps and their names (gaps that are filled), scores, strands
@@ -93,10 +100,10 @@ sub fillGap {
     my %sourceProfile = &SeqMule::Utils::readFastaIdx($source_fai);
     $mapping = &filterMapping($filter,$mapping);
     if(&ifTwinMapping($mapping)) {
-	warn  "twin mapping\n" if $debug;
-	    return(&twoAnchoredGap({gapRecord=>$gapRecord,mapping=>$mapping,fai=>$fai,id=>$id}));
+	warn  "DEBUG:twin mapping\n" if $debug;
+	return(&twoAnchoredGap({gapRecord=>$gapRecord,mapping=>$mapping,fai=>$fai,id=>$id}));
     } else {
-	warn  "not twin mapping\n" if $debug;
+	warn  "DEBUG:not twin mapping\n" if $debug;
 	#if gap occurs at an edge of the target assembly contig
 	#then only one sequence can be mapped
 	#when the gap doesn't occur the at edge, it is still possible to have only one sequence mapped
@@ -104,16 +111,147 @@ sub fillGap {
     }
 }
 sub twoAnchoredGap {
+    my $opt = shift;
+    my $gapRecord = $opt->{gapRecord};
+    my $mapping = $opt->{mapping};
+    my $fai = $opt->{fai};
+    my $id = $opt->{id};
+    my %targetProfile = &SeqMule::Utils::readFastaIdx($fai);
+    die "gap record illegal\n" unless $gapRecord->[2]>$gapRecord->[1]; 
+    my $gapLen = $gapRecord->[2]-$gapRecord->[1];
     my ($anchor1mapping,$anchor2mapping) = &splitMappingbyAnchor($mapping);
+    my @results;
+    my $count = 0;
     #iterate through all possible pairs to look for concordant pairs
     for my $i(@$anchor1mapping) {
 	for my $j(@$anchor2mapping) {
-    check if two flanking seq are concordant
-    check if distance between two flanking seq are within gaplen+tolerance
-    check orientation
-
+	    next if &isDiscordantAnchor($i,$j,$gapLen);
+	    $count++;
+	    push @results,();
+	    my ($ctg, $start, $end,
+		$name,$score,
+		$strand,#+ or -, used in BED
+		$status,#full or partial gap closing
+	    );
+	    $ctg = $i->{sid};
+	    $name = $id;
+	    $score = $i->{e};
+	    $strand = $i->{strand};
+	    ($start,$end) = &decideDoubleAnchoredGapLocus($i,$j);
+	    &checkOrientation($start,$end,$i,$j);
+	    $status = "bridge_full";
+	    if(defined $start && defined $end) {
+		push @results, [$ctg, $start, $end, $name,$score, $strand, $status];
+	    }
 	}
     }
+    warn "DEBUG: $count pairs of concordant anchors!\n" if $debug;
+    return @results;
+}
+sub decideDoubleAnchoredGapLocus {
+    my $i = shift;
+    my $j = shift;
+    my $dist1 = abs($i->{sstart} - $j->{send});
+    my $dist2 = abs($i->{send} - $j->{sstart});
+    my ($start,$end);
+    if($dist1 < $dist2) {
+	#+ strand
+	#           ----->		    ----->
+	#-----------------*****************>----------------           
+	#- strand
+	#           <-----		    <-----
+	#-----------------<*****************----------------           
+	if ($i->{strand} eq 'plus') {
+	    $start = $j->{send};
+	    $end = $i->{sstart}-1;
+	} else {
+	    $start = $j->{send};
+	    $end = $i->{sstart} + 1;
+	}
+    } elsif ($dist1 > $dist2) {
+	if ($i->{strand} eq 'plus') {
+	    $start = $i->{send};
+	    $end = $j->{sstart}-1;
+	} else {
+	    $start = $i->{send};
+	    $end = $j->{sstart} + 1;
+	}
+    } else {
+	warn "ERROR: Inner and outer distances are the same for the following mappings:\n";
+	&dumpMapping($i);
+	&dumpMapping($j);
+	die "\n";
+    }
+    return($start,$end);
+}
+sub checkOrientation {
+    my $start = shift;
+    my $end = shift;
+    my $mapping1 = shift;
+    my $mapping2 = shift;
+    if($mapping1->{strand} eq 'plus' and $start >= $end) {
+	warn "ERROR: start($start) must be smaller than end($end) on plus strand\n";
+	&dumpMapping($mapping1);
+	&dumpMapping($mapping2);
+	die;
+    } elsif($mapping1->{strand} eq 'minus' and $start <= $end) {
+	warn "ERROR: start($start) must be larger than end($end) on minus strand\n";
+	&dumpMapping($mapping1);
+	&dumpMapping($mapping2);
+	die;
+    }
+}
+sub isDiscordantAnchor {
+    my $i = shift; #one of anchor mapping
+    my $j = shift; #one of the other anchor mapping
+    my $gapLen = shift;
+    my $discordant = 0;
+    my ($chr1,$start1,$end1) = &parseQid($i->{qid});
+    my ($chr2,$start2,$end2) = &parseQid($j->{qid});
+
+    if($i->{strand} ne $j->{strand} or  #mapped to different strands
+	$i->{sid} ne $j->{sid}) { #mapped to different ctg
+	$discordant = 1;
+	return($discordant);
+    }
+    if($i->{strand} eq 'plus') {
+	#2nd anchor should not be upstream of 1st anchor
+	if( ($start1-$start2) * ($i->{sstart} - $j->{sstart}) > 0) {
+	    1;
+	} else {
+	    $discordant = 1;
+	}
+    } else {
+	#1st anchor should not be upstream of 2nd anchor
+	if( ($start1-$start2) * ($i->{sstart} - $j->{sstart}) < 0) {
+	    1;
+	} else {
+	    $discordant = 1;
+	}
+    }
+    #anchors cannot overlap or next to each other
+    if( ($i->{strand} eq 'plus' && $i->{sstart} <= $j->{send} && $i->{send} >= $j->{sstart} ) or
+	($i->{strand} eq 'minus' && $i->{sstart} >= $j->{send} && $i->{send} <= $j->{sstart}) or
+        ($i->{strand} eq 'plus' && ($i->{sstart} - $j->{send} == 1 || $j->{sstart} - $i->{send} == 1)) or
+	($i->{strand} eq 'minus' && ($i->{send} - $j->{sstart} == 1 || $j->{send} - $i->{sstart} == 1)) ) {
+	$discordant = 1;
+    }
+    return($discordant) if $discordant;
+    #distance between two mapped anchor on s(subject) should be reasonable
+    #either dist1 or dist2 is the inner distance (the gap distance)
+    my $dist1 = abs($i->{sstart} - $j->{send});
+    my $dist2 = abs($i->{send} - $j->{sstart});
+    if($dist1 < $dist2) {
+	$discordant = 1 if abs($dist1 - $gapLen) > $GAPLEN_MIS_TOLERANCE;
+    } elsif ($dist1 > $dist2) {
+	$discordant = 1 if abs($dist2 - $gapLen) > $GAPLEN_MIS_TOLERANCE;
+    } else {
+	warn "ERROR: Inner and outer distances are the same for the following mappings:\n";
+	&dumpMapping($i);
+	&dumpMapping($j);
+	die "\n";
+    }
+    return($discordant);
 }
 sub splitMappingbyAnchor {
     my $mapping = shift;
@@ -174,28 +312,31 @@ sub decideGapLocus {
 	$strand = "+";
 	if(&isUpstream($mapping,$gapRecord)) {
 	    #case2
-	    return if $mapping->{send} > $mapping->{slen};
+	    #if the following statement is true, then no extension can be done
+	    return if $mapping->{send} >= $mapping->{slen};
 	    $start = $mapping->{send}; #-1 is not necessary, this is end for flanking seq
 	    if($ctgInfo->{length} >= $mapping->{send} + $gapLen) {
 		#gap can be fully filled
-		$status = "full";
+		$status = "extension_full";
 		$end = $start + $gapLen;
 	    } else {
 		#gap can be partially filled
-		$status = "partial";
+		$status = "extension_partial";
 		$end = $ctgInfo->{length};
 	    }
 	} else {
 	    #case1
-	    return if $mapping->{sstart} < 0;
+	    #no extension can be done if the left end of anchor is on edge of source contig
+	    #mappping is 1-based, output is 0-based start, 1-based end
+	    return if $mapping->{sstart} <= 1;
 	    $end = $mapping->{sstart}-1; #-1 is necessary
 	    if($end - $gapLen >= 0) {
 		#gap can be fully filled
-		$status = "full";
+		$status = "extension_full";
 		$start = $end - $gapLen;
 	    } else {
 		#gap can be partially filled
-		$status = "partial";
+		$status = "extension_partial";
 		$start = 0;
 	    }
 	}
@@ -211,11 +352,12 @@ sub decideGapLocus {
 	$strand = "-";
 	if(&isUpstream($mapping,$gapRecord)) {
 	    #case4
-	    return if $mapping->{sstart} > $mapping->{slen}; #out of bound
+	    #if the following statement is true, then no extension can be done
+	    return if $mapping->{sstart} >= $mapping->{slen}; #out of bound
 	    $end = $mapping->{sstart}; #-1 is not necessary, this is end for flanking seq
 	    if($ctgInfo->{length} >= $end + $gapLen) {
 		#gap can be fully filled
-		$status = "full";
+		$status = "extension_full";
 		$start = $end + $gapLen;
 	    } else {
 		#gap can be partially filled
@@ -224,15 +366,17 @@ sub decideGapLocus {
 	    }
 	} else {
 	    #case3
-	    return if $mapping->{send} < 0;# out of bound
+	    #no extension can be done if the left end of anchor is on edge of source contig
+	    #mappping is 1-based, output is 0-based start, 1-based end
+	    return if $mapping->{send} <= 1;# out of bound
 	    $start = $mapping->{send}-1; #-1 is necessary
 	    if($start - $gapLen >= 0) {
 		#gap can be fully filled
-		$status = "full";
+		$status = "extension_full";
 		$end = $start - $gapLen;
 	    } else {
 		#gap can be partially filled
-		$status = "partial";
+		$status = "extension_partial";
 		$end = 0;
 	    }
 	}
@@ -277,13 +421,18 @@ sub isUpstream {
     my $mapping = shift;
     my $gap = shift;
     #chr1:10000-10100
-    my ($start,$end) = $mapping->{qid} =~ /^[^:]+:(\d+)-(\d+)$/ or 
-    die "unrecognized query ID: ",$mapping->{qid},"\n";
+    my ($chr,$start,$end) = &parseQid($mapping->{qid});
     if($end < $gap->[2]) {
 	return(1);
     } else {
 	return(0);
     }
+}
+sub parseQid {
+    my $id = shift;
+    $id =~ /^([^:]+):(\d+)-(\d+)$/ or 
+    die "unrecognized query ID: $id\n";
+    return($1,$2,$3);
 }
 sub ifTwinMapping {
     my $mapping = shift;
@@ -306,7 +455,7 @@ sub filterMapping {
     my $mapping = shift;
     my @result;
 
-    warn "before filtering ",int(@$mapping),"\n" if $debug;
+    warn "DEBUG:before filtering ",int(@$mapping),"\n" if $debug;
     for my $i(@$mapping) {
 	my $pass = 1;
 	if($filter->{'idt'}) {
@@ -318,9 +467,14 @@ sub filterMapping {
 	if($filter->{'e'}) {
 	    $pass = 0 if $i->{e} > $filter->{e};
 	}
+	#discard any mapping that doesn't have equal length on target and query
+	#we may fix these mappings in the future
+	if(abs($i->{sstart}-$i->{send}) != abs($i->{qstart} - $i->{qend})) {
+	    $pass = 0;
+	}
 	push @result,$i if $pass;
     }
-    warn "after filtering ",int(@result),"\n" if $debug;
+    warn "DEBUG:after filtering ",int(@result),"\n" if $debug;
     return(\@result);
 }
 sub parseMapping {
@@ -352,13 +506,13 @@ sub parseMapping {
 }
 sub readBED {
     my $bed=shift;
-    warn "reading $bed\n";
+    warn "NOTICE: reading $bed\n";
     my @out;
     open IN,'<',$bed or die "Cannot read $bed: $!\n";
     while(<IN>) {
 	chomp;
 	next if /^browser|^#|^track/;
-	warn "Can't recognize line $.\n" and next unless /^([^\t]+)\t(\d+)\t(\d+)\t([^\t]+)/;
+	warn "WARNING: Can't recognize line $.\n" and next unless /^([^\t]+)\t(\d+)\t(\d+)\t([^\t]+)/;
 	if ($3>$2) {
 	    push @out,[$1,$2,$3,$4];
 	} else {
