@@ -380,7 +380,7 @@ sub decideGapLocus {
 		$start = $end + $gapLen;
 	    } else {
 		#gap can be partially filled
-		$status = "partial";
+		$status = "extension_partial";
 		$start = $ctgInfo->{length};
 	    }
 	} else {
