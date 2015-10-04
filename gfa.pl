@@ -5,6 +5,7 @@ use lib "/home/yunfeiguo/projects/SeqMule/lib";
 use SeqMule::Utils;
 use File::Basename qw/basename/;
 use Data::Dumper;
+use Getopt::Std;
 
 #param
 my $FLANKSIZE = 100; #length of flank sequences for anchoring
@@ -18,7 +19,11 @@ my $fa2size = "/home/yunfeiguo/scripts/seq_related/fa2size.pl";
 my $extractGap = "/home/yunfeiguo/scripts/seq_related/extract_gaps.pl";
 
 
-die "Usage: $0 <target assembly> <source assembly>\n" unless @ARGV == 2;
+my %opts;
+getopts('s',\%opts);
+die "Usage: $0 <target assembly> <source assembly>\n".
+" -s	skip preprocessing (locating gaps, index db)\n"
+unless @ARGV == 2;
 my $fa = shift @ARGV;
 my $db = shift @ARGV;
 my $gap = (basename $fa).".gap.bed";
@@ -29,14 +34,16 @@ my $flankFa = (basename $fa).".gap.flank.fa";
 my $total = 0;
 my $unfilled = 0;
 
-if(0) {
+unless($opts{s}) {
     my $bed_for_merge = "/tmp/".rand($$).".tmp.bed.formerge";
     !system("$extractGap $fa > $gap") or die "Gap profiling failed\n" or die "$!\n";
     !system("cat $gap > $bed_for_merge") and !system("bedtools merge -i $bed_for_merge -d $MIN_GAP_DIST > $gap") or die "failed to merge: $!\n";
+    #after merging, gap numbers will be gone!
+    !system("perl -i -ne '\@f=split;push \@f,\"Gap\$.\";print join(\"\\t\",\@f),\"\\n\"' $gap") or die "failed to add Gap#: $!\n";
     !system("$fa2size $fa > $genome") or die "Genome file creation failed\n";
     #prepare blast index
-    !system("makeblastdb -in $db -dbtype nucl") or die "makeblastdb: $!\n";
-    !system("makembindex -input $db -iformat blastdb") or die "makembindex: $!\n";
+    !system("makeblastdb -in $db -dbtype nucl 1>&2") or die "makeblastdb: $!\n";
+    !system("makembindex -input $db -iformat blastdb 1>&2") or die "makembindex: $!\n";
 }
 if(1) {
     for my $onegapRecord(&readBED($gap)) {
@@ -65,9 +72,15 @@ if(1) {
 warn "NOTICE: $unfilled/$total remains unfilled\n";
 #-----------------------------------------------------------------
 sub outputFilledGap {
-    #take a lit of filled gaps and their names (gaps that are filled), scores, strands
+    #take a lit of filled gaps and their names (gaps that are filled), scores, strands, status, upstream/downstream
     #print BED
     for my $i(@_) {
+	if($i->[5] eq '-') {
+	    #on negative strand, switch start and end
+	    my $tmp = $i->[2];
+	    $i->[2] = $i->[1];
+	    $i->[1] = $tmp;
+	}
 	print join("\t",@$i),"\n";
     }
 }
@@ -132,14 +145,16 @@ sub twoAnchoredGap {
 		$name,$score,
 		$strand,#+ or -, used in BED
 		$status,#full or partial gap closing
+		$upDownstream, #fill from upstream or downstream?
 	    );
 	    $ctg = $i->{sid};
 	    $name = $id;
 	    $score = $i->{e};
-	    $strand = $i->{strand};
+	    $strand = ($i->{strand} eq 'plus'? '+':'-');
 	    ($start,$end) = &decideDoubleAnchoredGapLocus($i,$j);
 	    &checkOrientation($start,$end,$i,$j);
 	    $status = "bridge_full";
+	    $upDownstream = "NA"; #for double anchors, there is no up down stream
 	    if(defined $start && defined $end) {
 		push @results, [$ctg, $start, $end, $name,$score, $strand, $status];
 	    }
@@ -284,11 +299,12 @@ sub extendGap {
 	    $name,$score,
 	    $strand,#+ or -, used in BED
 	    $status,#full or partial gap closing
+	    $upDownstream, #extension from upstream or downstream?
 	);
 	$ctg = $i->{sid};
 	$name = $id;
 	$score = $i->{e};
-	($start,$end,$strand,$status) = &decideGapLocus($targetProfile{$i->{sid}},$i,$gapRecord,$gapLen);
+	($start,$end,$strand,$status,$upDownstream) = &decideGapLocus($targetProfile{$i->{sid}},$i,$gapRecord,$gapLen);
 	if(defined $start && defined $end) {
 	    push @oneresult,$ctg, $start, $end, $name,$score, $strand, $status;
 	    push @results,\@oneresult;
@@ -301,7 +317,7 @@ sub decideGapLocus {
     my $mapping = shift;
     my $gapRecord = shift;
     my $gapLen = shift;
-    my ($start,$end,$strand,$status);
+    my ($start,$end,$strand,$status,$upDownstream);
     &fixMapping($mapping);
     if($mapping->{strand} eq 'plus') {
 	#* for N, |----> for mapping
@@ -311,6 +327,7 @@ sub decideGapLocus {
 	#----------------------|--->**********---
 	$strand = "+";
 	if(&isUpstream($mapping,$gapRecord)) {
+	    $upDownstream = "upstream";
 	    #case2
 	    #if the following statement is true, then no extension can be done
 	    return if $mapping->{send} >= $mapping->{slen};
@@ -325,6 +342,7 @@ sub decideGapLocus {
 		$end = $ctgInfo->{length};
 	    }
 	} else {
+	    $upDownstream = "downstream";
 	    #case1
 	    #no extension can be done if the left end of anchor is on edge of source contig
 	    #mappping is 1-based, output is 0-based start, 1-based end
@@ -351,6 +369,7 @@ sub decideGapLocus {
 	#----------------------<---|**********---
 	$strand = "-";
 	if(&isUpstream($mapping,$gapRecord)) {
+	    $upDownstream = "upstream";
 	    #case4
 	    #if the following statement is true, then no extension can be done
 	    return if $mapping->{sstart} >= $mapping->{slen}; #out of bound
@@ -365,6 +384,7 @@ sub decideGapLocus {
 		$start = $ctgInfo->{length};
 	    }
 	} else {
+	    $upDownstream = "downstream";
 	    #case3
 	    #no extension can be done if the left end of anchor is on edge of source contig
 	    #mappping is 1-based, output is 0-based start, 1-based end
@@ -391,7 +411,7 @@ sub decideGapLocus {
 	&dumpMapping($mapping);
 	die "equal start and end !\n";
     }
-    return($start,$end,$strand,$status);
+    return($start,$end,$strand,$status,$upDownstream);
 }
 sub dumpMapping {
     my $mapping = shift;
