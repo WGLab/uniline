@@ -16,7 +16,7 @@ my $filter = {qcov=>95,idt=>95,e=>1e-8}; #mapping filters
 my $debug = 1;
 #external exe
 my $fa2size = "/home/yunfeiguo/scripts/seq_related/fa2size.pl";
-my $extractGap = "/home/yunfeiguo/scripts/seq_related/extract_gaps.pl";
+my $extractGap = "/home/yunfeiguo/projects/uniline/bin/extract_gaps.pl";
 
 
 my %opts;
@@ -34,6 +34,18 @@ my $flankFa = (basename $fa).".gap.flank.fa";
 my $total = 0;
 my $unfilled = 0;
 
+#create fasta index for input
+my $fai = "$fa.fai";
+my $dbi = "$db.fai";
+unless(-e $fai or -l $fai) {
+    warn "Call SAMtools to create FASTA index first\n";
+    !system("samtools faidx $fa") or die "samtools $fa indexing failed: $!\n";
+}
+unless(-e $dbi or -l $dbi) {
+    warn "Call SAMtools to create FASTA index first\n";
+    !system("samtools faidx $db") or die "samtools $db indexing failed: $!\n";
+}
+
 unless($opts{s}) {
     my $bed_for_merge = "/tmp/".rand($$).".tmp.bed.formerge";
     !system("$extractGap $fa > $gap") or die "Gap profiling failed\n" or die "$!\n";
@@ -47,7 +59,6 @@ unless($opts{s}) {
 }
 if(1) {
     for my $onegapRecord(&readBED($gap)) {
-	#next unless $onegapRecord->[0] =~ /chr17_KI270729v1_random/;
 	my $onegap = &SeqMule::Utils::genBED([$onegapRecord]);
 	my $gapid = join("_",@$onegapRecord);
 	my $oneflank = "$onegap.flank.bed";
@@ -130,7 +141,7 @@ sub twoAnchoredGap {
     my $fai = $opt->{fai};
     my $id = $opt->{id};
     my %targetProfile = &SeqMule::Utils::readFastaIdx($fai);
-    die "gap record illegal\n" unless $gapRecord->[2]>$gapRecord->[1]; 
+    die "ERROR: gap record illegal\n" unless $gapRecord->[2]>$gapRecord->[1]; 
     my $gapLen = $gapRecord->[2]-$gapRecord->[1];
     my ($anchor1mapping,$anchor2mapping) = &splitMappingbyAnchor($mapping);
     my @results;
@@ -450,7 +461,8 @@ sub isUpstream {
 }
 sub parseQid {
     my $id = shift;
-    $id =~ /^([^:]+):(\d+)-(\d+)$/ or 
+    #$id =~ /^([^:]+):(\d+)-(\d+)$/ or 
+    $id =~ /^(.+?):(\d+)-(\d+)$/ or  #FASTA ID may look like chr1:1-1000:2-50
     die "unrecognized query ID: $id\n";
     return($1,$2,$3);
 }
