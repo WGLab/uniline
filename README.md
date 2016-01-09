@@ -8,3 +8,6 @@ samtools(0.1.19-44428cd)
 blast(2.2.31+)
 perl(v5.16.0)
 bedtools(v2.25.0)
+
+# Installation
+`./Build_uniline`
