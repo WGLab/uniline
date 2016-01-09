@@ -72,4 +72,51 @@ sub fa2size {
     croak("$fai missing!\n") unless -e $fai or -l $fai;
     return(!system("cut -f 1,2 $fai | sort -k 1,1 -k2,2n > $genome"));
 }
+sub extractGap {
+    carp("Scanning for gaps...\n");
+    my $fa = shift;
+    my $out = shift;
+    my $count = 0;
+    open IN,"<",$fa or die "ERROR: open() failed to read $fa $!\n";
+    open OUT,">",$out or die "ERROR: open() failed to write $out $!\n";
+    select OUT;
+    my ($id,$ingap,$pos,$start,$end,$cur);
+    while(my $l = <IN>) {
+	if ($l =~ /^>(\S+)/) {
+	    if ($ingap) {
+		$end = $pos;
+		print "$id\t$start\t$end\tGap$count\n";
+	    }
+	    $id = $1;
+	    $pos = 0;
+	} else {
+	    my $len = length($l);
+	    my $i = 0;
+	    while ($i < $len) {
+		$pos++;
+		$cur = substr($l,$i,1);
+		if($cur eq 'N' or $cur eq 'n') {
+		    if (not $ingap) {
+			#get a new gap
+			$count++;
+			$ingap = 1;
+			$start = $pos - 1; #zero start in BED file
+		    }
+		} elsif ($ingap) {
+		    $ingap = 0;
+		    $end = $pos - 1;
+		    print "$id\t$start\t$end\tGap$count\n";
+		} 
+		$i++;
+	    }
+	}
+    }
+    if ($ingap) {
+	$end = $pos;
+	print "$id\t$start\t$end\tGap$count\n";
+    }
+    close IN;
+    close OUT;
+    carp("NOTICE: all gaps extracted to $out\n");
+}
 1;
