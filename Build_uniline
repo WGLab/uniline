@@ -2,27 +2,32 @@
 use strict;
 use warnings;
 
+my $src = "src";
+my $bin = "bin";
 #copy all scripts from src/ to bin/
-if (-d "src") {
-    if (not -d "bin") {
-	mkdir "bin" or die "ERROR: mkdir() failed to create bin/ $!\n";
+if (-d "$src") {
+    if (not -d "$bin") {
+	mkdir "$bin" or die "ERROR: mkdir() failed to create $bin/ $!\n";
     }
-    opendir (my $src,"src") or die "ERROR: opendir() failed reading src/ $!\n";
-    while (my $i = readdir $src) {
+    opendir (my $src_dh,"$src") or die "ERROR: opendir() failed reading $src/ $!\n";
+    while (my $i = readdir $src_dh) {
 	next if $i eq '.' or $i eq '..';
-	!system("cp -f src/$i bin/") or die "ERROR: cp failed $!\n";
+	!system("cp -f $src/$i $bin/") or die "ERROR: cp failed $!\n";
     }
-    closedir $src;
+    closedir $src_dh;
 } else {
-    die "ERROR: src/ does not exist!\nMake sure you are in the root folder of uniline.\n";
+    die "ERROR: $src/ does not exist!\nMake sure you are in the root folder of uniline.\n";
 }
 
 #add 'use lib $PWD/lib/perl5lib' to each perl script
-opendir (my $bin,"bin") or die "ERROR: opendir() failed reading bin/ $!\n";
+opendir (my $bin_dh,"$bin") or die "ERROR: opendir() failed reading $bin/ $!\n";
 my $PWD = $ENV{PWD};
-while (my $i = readdir $bin) {
+while (my $i = readdir $bin_dh) {
     if ($i =~ /\.pl$/) {
-	!system("perl -i -pe 'print \"use lib \\\"$PWD/lib/perl5lib\\\";\\n\" if \$.==2' bin/$i") or die "ERROR: failed to write lib directory $!\n";
+	!system("perl -i -pe 'print \"use lib \\\"$PWD/lib/perl5lib\\\";\\n\" if \$.==2' $bin/$i") or die "ERROR: failed to write lib directory $!\n";
     }
 }
-closedir $bin;
+closedir $bin_dh;
+
+#check dependencies
+system("$src/check_dependency.py");
