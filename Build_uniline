@@ -30,4 +30,6 @@ while (my $i = readdir $bin_dh) {
 closedir $bin_dh;
 
 #check dependencies
-system("$src/check_dependency.py");
+!system("$src/check_dependency.py") or die "\n";
+
+warn("Build success!\nuniline is ready to use.\n");

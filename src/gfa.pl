@@ -1,8 +1,7 @@
 #!/usr/bin/env perl
+use uniline::Utils;
 use strict;
 use warnings;
-use lib "/home/yunfeiguo/projects/SeqMule/lib";
-use SeqMule::Utils;
 use File::Basename qw/basename/;
 use Data::Dumper;
 use Getopt::Std;
@@ -15,7 +14,6 @@ my $nproc = 12; #nproc for blast
 my $filter = {qcov=>95,idt=>95,e=>1e-8}; #mapping filters
 my $debug = 1;
 #external exe
-my $fa2size = "/home/yunfeiguo/scripts/seq_related/fa2size.pl";
 my $extractGap = "/home/yunfeiguo/projects/uniline/bin/extract_gaps.pl";
 
 
@@ -30,7 +28,6 @@ my $gap = (basename $fa).".gap.bed";
 my $genome = (basename $fa).".genome";
 my $flankBed = (basename $fa).".gap.flank.bed";
 my $flankFa = (basename $fa).".gap.flank.fa";
-#my $db = "/home/yunfeiguo/projects/PacBio_reference_genome/falcon_aln/hx1_20150716/2-asm-falcon/hx1f4full.fa";
 my $total = 0;
 my $unfilled = 0;
 
@@ -45,21 +42,20 @@ unless(-e $dbi or -l $dbi) {
     warn "Call SAMtools to create FASTA index first\n";
     !system("samtools faidx $db") or die "samtools $db indexing failed: $!\n";
 }
-
 unless($opts{s}) {
     my $bed_for_merge = "/tmp/".rand($$).".tmp.bed.formerge";
-    !system("$extractGap $fa > $gap") or die "Gap profiling failed\n" or die "$!\n";
-    !system("cat $gap > $bed_for_merge") and !system("bedtools merge -i $bed_for_merge -d $MIN_GAP_DIST > $gap") or die "failed to merge: $!\n";
+    &uniline::Utils::extractGap($fa,$gap) or die "Gap profiling failed\n";
+    !system("cp $gap $bed_for_merge") and !system("bedtools merge -i $bed_for_merge -d $MIN_GAP_DIST > $gap") or die "failed to merge: $!\n";
     #after merging, gap numbers will be gone!
     !system("perl -i -ne '\@f=split;push \@f,\"Gap\$.\";print join(\"\\t\",\@f),\"\\n\"' $gap") or die "failed to add Gap#: $!\n";
-    !system("$fa2size $fa > $genome") or die "Genome file creation failed\n";
+    &uniline::Utils::fa2size($fa,$genome) or die "Genome file creation failed: $!\n";
     #prepare blast index
     !system("makeblastdb -in $db -dbtype nucl 1>&2") or die "makeblastdb: $!\n";
     !system("makembindex -input $db -iformat blastdb 1>&2") or die "makembindex: $!\n";
 }
 if(1) {
-    for my $onegapRecord(&readBED($gap)) {
-	my $onegap = &SeqMule::Utils::genBED([$onegapRecord]);
+    for my $onegapRecord(&uniline::Utils::readBED($gap)) {
+	my $onegap = &uniline::Utils::genBED([$onegapRecord]);
 	my $gapid = join("_",@$onegapRecord);
 	my $oneflank = "$onegap.flank.bed";
 	my $oneflankfa = "$oneflank.fa";
@@ -121,7 +117,7 @@ sub fillGap {
     my $filter = $opt->{filter};
     my $id = $opt->{id};
     my $filledGap = "";
-    my %sourceProfile = &SeqMule::Utils::readFastaIdx($source_fai);
+    my %sourceProfile = &uniline::Utils::readFastaIdx($source_fai);
     $mapping = &filterMapping($filter,$mapping);
     if(&ifTwinMapping($mapping)) {
 	warn  "DEBUG:twin mapping\n" if $debug;
@@ -140,7 +136,7 @@ sub twoAnchoredGap {
     my $mapping = $opt->{mapping};
     my $fai = $opt->{fai};
     my $id = $opt->{id};
-    my %targetProfile = &SeqMule::Utils::readFastaIdx($fai);
+    my %targetProfile = &uniline::Utils::readFastaIdx($fai);
     die "ERROR: gap record illegal\n" unless $gapRecord->[2]>$gapRecord->[1]; 
     my $gapLen = $gapRecord->[2]-$gapRecord->[1];
     my ($anchor1mapping,$anchor2mapping) = &splitMappingbyAnchor($mapping);
@@ -300,7 +296,7 @@ sub extendGap {
     my $mapping = $opt->{mapping};
     my $fai = $opt->{fai};
     my $id = $opt->{id};
-    my %targetProfile = &SeqMule::Utils::readFastaIdx($fai);
+    my %targetProfile = &uniline::Utils::readFastaIdx($fai);
     die "gap record illegal\n" unless $gapRecord->[2]>$gapRecord->[1]; 
     my $gapLen = $gapRecord->[2]-$gapRecord->[1];
     my @results;
@@ -535,22 +531,4 @@ sub parseMapping {
     }
     close IN;
     return \@results;
-}
-sub readBED {
-    my $bed=shift;
-    warn "NOTICE: reading $bed\n";
-    my @out;
-    open IN,'<',$bed or die "Cannot read $bed: $!\n";
-    while(<IN>) {
-	chomp;
-	next if /^browser|^#|^track/;
-	warn "WARNING: Can't recognize line $.\n" and next unless /^([^\t]+)\t(\d+)\t(\d+)\t([^\t]+)/;
-	if ($3>$2) {
-	    push @out,[$1,$2,$3,$4];
-	} else {
-	    push @out,[$1,$3,$2,$4];
-	}
-    }
-    close IN;
-    return @out;
 }
