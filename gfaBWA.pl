@@ -524,6 +524,7 @@ sub parseMapping {
 	#0	1	2	3	4	5	6	7	8	9	10
 	next if $f[5] eq '*';
 	my $mapping_detail = &parseCigar($f[5]);
+	my $strand = $f[8] & 16? '-':'+'; #flag 16 for read reverse strand
 	push @results,{
 	    qid		=>	$f[0],
 	    qlen	=>	length($f[9]),
@@ -531,9 +532,9 @@ sub parseMapping {
 	    slen	=>	$ref_length{$f[2]},
 	    qstart	=>	$mapping_detail->{qstart}, 
 	    qend	=>	$mapping_detail->{qend}, 
-	    sstart	=>	$f[3] + $mapping_detail->{sstart},
-	    send	=>	$f[3] + $mapping_detail->{send},
-	    strand	=>	$f[8] & 16? '-':'+', #flag 16 for read reverse strand
+	    sstart	=>	$f[3] + ($strand eq '+' : $mapping_detail->{sstart} : $mapping_detail->{send}),
+	    send	=>	$f[3] + ($strand eq '+' : $mapping_detail->{send} : $mapping_detail->{sstart}),
+	    strand	=>	$strand,
 	    mapq	=>	$f[4],
 	    idt		=>	$mapping_detail->{idt},
 	    qcov	=>	$mapping_detail->{qcov},
@@ -543,49 +544,85 @@ sub parseMapping {
     return \@results;
 }
 sub parseCigar {
+    #return 1-based coordinate
     my $cigar = shift;
     my $mapping_detail = {};
     my ($qstart,$qend,$sstart,$send,$idt,$qcov) = &parseCigar($f[5]);
     #cigar characters: M, I, D, S, *, =, H
     #we use the first M as the qstart, last M as qend
+    #
     #how to handle I?
     #reference: AT*CG
     #read:      ATTCG
     #qstart, qend will count both M and I
     #start and send will only count M
+    #
     #how to handle D?
     #reference: ATCG
     #read:      A*CG
     #qstart, qend will count M
     #sstart and send will count both M and D
-    my @cigar_fields = $cigar =~ /(\d+)(\D+)/g;
-    @cigar_fields = reverse @cigar_fields;
+    #
+    #how to handle H?
+    #reference: ATCG
+    #read:      -TCG
+    #the impact for ref and read is the same
+    #
+    #how to handle S?
+    #count as if it is M unless it occurs at the beginning or end
+
+    #issues with strandness
+    #positive strand, nothing special
+    #negative strand, the read is converted to reverse complement, and mapped
+    #therefore the cigar string is generated relative to the reverse complement
+    my @cigar_fields = &cigar2array($cigar);
     $mapping_detail->{qstart} = -1;
-    $mapping_detail->{qend} = -1;
-    my ($soffset, $qoffset) = (0, 0); #count D and I for ref and read, respectively
-    my $position = 0;
-    my $i = 0;
+    my ($offsetD, $offsetI) = (0, 0); #count D and I for ref and read, respectively
+    my $position = 0; #count how many non-H bp
+    my $countM = 0;
+    my $totalBP = 0;
+    my $i = 0; #index for cigar fields
     while ($i < @cigar_fields) {
 	if ($cigar_fields[$i] eq 'M' && $mapping_detail->{qstart} != -1) {
-	    $mapping_detail->{qstart} = $position + 1;
-	    $mapping_detail->{sstart} = $position; #this is relative position to POS field
+	    $mapping_detail->{qstart} = $totalBP + 1;
+	    $mapping_detail->{sstart} = $totalBP - $offsetI + 1; #this is relative position to POS field
+	    $countM += $cigar_fields[$i+1];
 	} elsif ($cigar_fields[$i] eq 'M') {
-	    $mapping_detail->{qend} = $position + $cigar_fields[$i + 1];
-	    $mapping_detail->{send} = $position + $cigar_fields[$i + 1];
+	    $mapping_detail->{qend} = $totalBP + $cigar_fields[$i + 1];
+	    $mapping_detail->{send} = $totalBP + $cigar_fields[$i + 1]???;
+	    $countM += $cigar_fields[$i+1];
+	} elsif ($cigar_fields[$i] eq 'H') {
+
+	} elsif ($cigar_fields[$i] eq 'S') {
+
 	} else {
 	    $nonmatch_in_middle += $cigar_fields[$i + 1];
 	    if ($cigar_fields[$i] eq 'D') {
-		$soffset += $cigar_fields[$i + 1];
+		$offsetD += $cigar_fields[$i + 1];
 	    } elsif ($cigar_fields[$i] eq 'I') {
-		$qoffset += $cigar_fields[$i + 1];
+		$offsetI += $cigar_fields[$i + 1];
 	    }
 	}
 	$position += $cigar_fields[$i + 1];
+	$totalBP += $cigar_fields[$i + 1];
 	$i += 2;
     }
     $mapping_detail->{qend} += $qoffset;
     $mapping_detail->{send} += $soffset;
+    $mapping_detail->{idt} = $countM/$totalBP * 100; #identity percentage
+    $mapping_detail->{qcov} = 100 * ($mapping_detail->{qend} - $mapping_detail->{qstart} + 1) / $totalBP; #percentage of query covered
     return $mapping_detail;
+}
+sub cigar2array {
+    #convert 1M2D3M4I to
+    #(M,1,D,2,M,3,I,4)
+    my $cigar = shift;
+    my @cigar_fields = $cigar =~ /(\d+)(\D+)/g;
+    my @return;
+    for my $i(0..(@cigar_fields/2 - 1)) {
+	push @return,$cigar_fields[$_*2+1],$cigar_fields[$_*2];
+    }
+    return @return;
 }
 sub readBED {
     my $bed=shift;
