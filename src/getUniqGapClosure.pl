@@ -12,7 +12,7 @@ my $input = shift @ARGV;
 open IN,'<',$input or die "open($input): $!\n";
 while(<IN>) {
     #example line
-    #000267F-010-01	0	432	chr1_297968_347968_Gap3	3e-45	-	extension_partial
+    #000267F-010-01	0	432	chr1_297968_347968_Gap3	45	-	extension_partial
     #0			1	2	3			4	5	6
     my @f=split;
     my $l=$f[2]-$f[1]; #length of gap on source assembly
@@ -26,7 +26,7 @@ while(<IN>) {
 	if(defined $opts{l}) {
 	    next unless $orig[2]-$orig[1] >= $opts{l};
 	} 
-	$seen{$f[3]} = join("\t",@g[0..2,3],$f[6]);
+	$seen{$f[3]} = join("\t",@g[0..2],$f[4],$g[3],$f[6]);
     }
 }
 close IN;
