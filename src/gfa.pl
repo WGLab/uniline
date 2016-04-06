@@ -156,13 +156,13 @@ sub twoAnchoredGap {
 	    );
 	    $ctg = $i->{sid};
 	    $name = $id;
-	    $score = $i->{e};
 	    $strand = ($i->{strand} eq 'plus'? '+':'-');
 	    ($start,$end) = &decideDoubleAnchoredGapLocus($i,$j);
 	    &checkOrientation($start,$end,$i,$j);
 	    $status = "bridge_full";
 	    $upDownstream = "NA"; #for double anchors, there is no up down stream
 	    if(defined $start && defined $end) {
+	        $score = &uniline::Stats::calcGapScore($j->{e},$i->{e},$gapLen, abs($end-$start));
 		push @results, [$ctg, $start, $end, $name,$score, $strand, $status];
 	    }
 	}

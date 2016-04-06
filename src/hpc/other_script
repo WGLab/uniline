@@ -1,0 +1,4 @@
+#merge unmapped regions on query
+~/bin/bedtools merge -d 100 -i mapped_ref_hg38_query_hx1f1_combo.bed > mapped_ref_hg38_query_hx1f1_combo.merge.bed
+#get intervals larger than 10k
+perl -ne '@f=split;print if $f[2]-$f[1]>=10_000' mapped_ref_hg38_query_hx1f1_combo.merge.bed > mapped_ref_hg38_query_hx1f1_combo.merge.10k.bed

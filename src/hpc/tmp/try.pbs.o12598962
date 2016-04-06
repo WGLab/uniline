@@ -1,0 +1,30 @@
+----------------------------------------
+Begin PBS Prologue Mon Jul 13 11:40:07 PDT 2015
+Job ID:            12598962.hpc-pbs.hpcc.usc.edu
+Username:          yunfeigu
+Group:             bisc-ar
+Project:           lc_kw
+Name:              try.pbs
+Queue:             laird
+Shared Access:     yes
+All Cores:         no
+Has MIC:           no
+Nodes:             hpc1415 
+TMPDIR:            /tmp/12598962.hpc-pbs.hpcc.usc.edu
+End PBS Prologue Mon Jul 13 11:40:08 PDT 2015
+----------------------------------------
+----------------------------------------
+Begin PBS Epilogue Mon Jul 13 11:40:08 PDT 2015
+Job ID:           12598962.hpc-pbs.hpcc.usc.edu
+Username:         yunfeigu
+Group:            bisc-ar
+Job Name:         try.pbs
+Session:          3236
+Limits:           neednodes=1:ppn=1,nodes=1:ppn=1,walltime=02:00:00
+Resources:        cput=00:00:00,mem=0kb,vmem=0kb,walltime=00:00:01
+Queue:            laird
+Shared Access:    yes
+Has MIC:          no
+Account:          lc_kw
+End PBS Epilogue Mon Jul 13 11:40:08 PDT 2015
+----------------------------------------

@@ -117,6 +117,7 @@ sub extractGap {
     }
     close IN;
     close OUT;
+    select STDOUT;
     carp("NOTICE: all gaps extracted to $out\n");
 }
 1;

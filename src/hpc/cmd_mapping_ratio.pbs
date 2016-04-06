@@ -1,0 +1,14 @@
+#!/bin/bash
+#PBS -m ea
+#PBS -M guoyunfei1989@gmail.com
+#PBS -S /bin/bash
+#PBS -V
+#PBS -N mappingRatio3
+#PBS -l walltime=99:0:0
+#PBS -l nodes=1:ppn=1
+#PBS -l mem=128GB
+#PBS -A lc_kw
+#PBS -q laird
+cd $PBS_O_WORKDIR
+/auto/rcf-proj/kw/yunfeigu/pacbio_reference/mummer/mapping_ratio/proc_coords_with_BEDmerging.pl /auto/rcf-proj/kw/yunfeigu/pacbio_reference/mummer/mapping_ratio/../../data/hx1_freeze1.fasta /auto/rcf-proj/kw/yunfeigu/pacbio_reference/mummer/mapping_ratio/unfiltered_coords/*.coords > /auto/rcf-proj/kw/yunfeigu/pacbio_reference/mummer/mapping_ratio/mapping_raiot_ref_hg38_query_hx1_merging_enabled.txt
+#/auto/rcf-proj/kw/yunfeigu/pacbio_reference/mummer/mapping_ratio/proc_coords_with_BEDmerging.pl /auto/rcf-proj/kw/yunfeigu/pacbio_reference/mummer/mapping_ratio/../../data/hx1_freeze1.fasta /auto/rcf-proj/kw/yunfeigu/pacbio_reference/mummer/mapping_ratio/try.coords > /auto/rcf-proj/kw/yunfeigu/pacbio_reference/mummer/mapping_ratio/try.out
