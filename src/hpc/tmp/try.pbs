@@ -1,9 +1,0 @@
-#!/bin/bash
-#PBS -e 1.e
-#PBS -l walltime=2:0:0
-#PBS -l nodes=1:ppn=1
-#PBS -A lc_kw
-#PBS -q laird
-#PBS -S /bin/bash
-set -e
-sleep

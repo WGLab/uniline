@@ -1,0 +1,15 @@
+#!/bin/bash
+set -e
+#we are using the lastest pysam module, to avoid conflict with existing modules, we use virtual_env
+source ./python_virtualenv/bin/activate
+for i in /home/yunfeiguo/projects/PacBio_reference_genome/falcon_aln/hx1_20150716/2-asm-falcon/hx1f4.3rdfixedv2.fa /home/yunfeiguo/projects/PacBio_reference_genome/falcon_aln/hx1_20150716/2-asm-falcon/hx1f4s4full_3rdfixedv2/scaffolding_no_associate_ctg/hx1f4s4_3rdfixedv2.fa /home/yunfeiguo/projects/PacBio_reference_genome/data/assemblies/GCA_001013985.1_ASM101398v1_genomic_NA12878.fna /home/yunfeiguo/projects/PacBio_reference_genome/data/assemblies/GCA_000004845.2_YH_2.0_genomic.fna /home/yunfeiguo/projects/PacBio_reference_genome/data/assemblies/GCA_000002125.2_HuRef_genomic.fna 
+#for i in /home/yunfeiguo/projects/PacBio_reference_genome/falcon_aln/hx1_20150716/2-asm-falcon/hx1f4.3rdfixedv2.fa 
+do
+    #for l in 100000 200000 1000000
+    for l in 10000
+    do
+	echo ./assessScaffoldAccuracy.pl bwa 250 $l `basename $i`"Againsthg38Main" /share/datasets/assemblies/human/hg38_reference_and_index/hg38ForBWA0.7.8-r455/GCA_000001405.15_GRCh38_mainChromosomeOnly_analysis_set.fna $i | qsub -V -cwd -l h_vmem=40G -N win${l}anchor250bp
+	#./assessScaffoldAccuracy.pl bwa 250 $l `basename $i`"Againsthg38Main" /share/datasets/hg38_reference_and_index/hg38ForBWA0.7.8-r455/GCA_000001405.15_GRCh38_mainChromosomeOnly_analysis_set.fna $i
+    done
+done
+echo all done
