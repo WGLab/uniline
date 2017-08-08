@@ -82,6 +82,7 @@ sub extractGap {
     select OUT;
     my ($id,$ingap,$pos,$start,$end,$cur);
     while(my $l = <IN>) {
+    	chomp($l);
 	if ($l =~ /^>(\S+)/) {
 	    if ($ingap) {
 		$end = $pos;
